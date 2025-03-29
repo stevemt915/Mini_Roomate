@@ -1,24 +1,62 @@
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function StudentLogin() {
   const router = useRouter();
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-  });
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    // Check for pending profile data on mount
+    const checkPendingProfile = async () => {
+      const pendingProfile = await AsyncStorage.getItem('pendingStudentProfile');
+      if (pendingProfile) {
+        const { email: storedEmail } = JSON.parse(pendingProfile);
+        setEmail(storedEmail);
+      }
+    };
+    checkPendingProfile();
+  }, []);
+
   const handleLogin = async () => {
+    if (!email || !password) {
+      Alert.alert('Error', 'Please enter both email and password');
+      return;
+    }
+
     try {
       setLoading(true);
-      const { error } = await supabase.auth.signInWithPassword(formData);
-      
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
       if (error) throw error;
+
+      // Check for pending profile data and insert it
+      const pendingProfile = await AsyncStorage.getItem('pendingStudentProfile');
+      if (pendingProfile && data.user) {
+        const { fullName, roomNumber } = JSON.parse(pendingProfile);
+        const { error: profileError } = await supabase
+          .from('student_profiles')
+          .insert({
+            user_id: data.user.id,
+            full_name: fullName,
+            room_number: roomNumber,
+          });
+
+        if (profileError) throw profileError;
+
+        await AsyncStorage.removeItem('pendingStudentProfile');
+      }
+
       router.replace('/(student)/dashboard');
     } catch (error: any) {
+      console.error('Login Error:', error);
       Alert.alert('Error', error.message);
     } finally {
       setLoading(false);
@@ -35,30 +73,33 @@ export default function StudentLogin() {
           placeholder="Email"
           keyboardType="email-address"
           autoCapitalize="none"
-          value={formData.email}
-          onChangeText={(text) => setFormData({ ...formData, email: text })}
+          value={email}
+          onChangeText={setEmail}
         />
-
         <TextInput
           style={styles.input}
           placeholder="Password"
           secureTextEntry
-          value={formData.password}
-          onChangeText={(text) => setFormData({ ...formData, password: text })}
+          value={password}
+          onChangeText={setPassword}
         />
       </View>
 
-      <TouchableOpacity 
-        style={[styles.button, loading && styles.buttonDisabled]} 
+      <TouchableOpacity
+        style={[styles.button, loading && styles.buttonDisabled]}
         onPress={handleLogin}
         disabled={loading}
       >
-        <Text style={styles.buttonText}>{loading ? 'Logging in...' : 'Login'}</Text>
+        {loading ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Login</Text>
+        )}
       </TouchableOpacity>
 
       <View style={styles.signupContainer}>
-        <Text style={styles.signupText}>Don't have an account? </Text>
-        <TouchableOpacity onPress={() => router.push('/student-signup')}>
+        <Text style={styles.signupText}>Don’t have an account? </Text>
+        <TouchableOpacity onPress={() => router.push('/(auth)/student-signup')}>
           <Text style={styles.signupLink}>Sign Up</Text>
         </TouchableOpacity>
       </View>
@@ -69,7 +110,7 @@ export default function StudentLogin() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F5F7F5',
     padding: 20,
     alignItems: 'center',
     justifyContent: 'center',
@@ -78,6 +119,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontFamily: 'Aeonik-Bold',
     marginBottom: 30,
+    color: '#4A7043',
   },
   inputContainer: {
     width: '100%',
@@ -94,11 +136,15 @@ const styles = StyleSheet.create({
     fontFamily: 'Aeonik-Regular',
   },
   button: {
-    backgroundColor: '#B3D8A8',
+    backgroundColor: '#4A7043',
     padding: 15,
     borderRadius: 8,
     width: '100%',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   buttonDisabled: {
     backgroundColor: '#cccccc',
@@ -117,7 +163,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Aeonik-Regular',
   },
   signupLink: {
-    color: '#B3D8A8',
+    color: '#4A7043',
     fontFamily: 'Aeonik-Medium',
   },
-}); 
+});

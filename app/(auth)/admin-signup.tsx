@@ -1,44 +1,62 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+interface FormData {
+  email: string;
+  password: string;
+  confirmPassword: string;
+  hostelName: string;
+}
+
+interface Errors {
+  email: string;
+  password: string;
+  confirmPassword: string;
+  hostelName: string;
+}
 
 export default function AdminSignup() {
   const router = useRouter();
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<FormData>({
     email: '',
     password: '',
     confirmPassword: '',
+    hostelName: '',
   });
-
-  const [errors, setErrors] = useState({
+  const [errors, setErrors] = useState<Errors>({
     email: '',
     password: '',
     confirmPassword: '',
+    hostelName: '',
   });
+  const [loading, setLoading] = useState<boolean>(false);
 
-  const [loading, setLoading] = useState(false);
-
-  const validateForm = () => {
+  const validateForm = (): boolean => {
     let isValid = true;
-    const newErrors = { ...errors };
+    const newErrors: Errors = { ...errors };
 
-    // Email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(formData.email)) {
       newErrors.email = 'Please enter a valid email';
       isValid = false;
     }
 
-    // Password validation
-    if (formData.password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
+    const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
+    if (!passwordRegex.test(formData.password)) {
+      newErrors.password = 'Password must be 8+ chars with letters and numbers';
       isValid = false;
     }
 
-    // Confirm Password validation
     if (formData.password !== formData.confirmPassword) {
       newErrors.confirmPassword = 'Passwords do not match';
+      isValid = false;
+    }
+
+    if (!formData.hostelName.trim()) {
+      newErrors.hostelName = 'Hostel name is required';
       isValid = false;
     }
 
@@ -47,33 +65,40 @@ export default function AdminSignup() {
   };
 
   const handleSignup = async () => {
-    if (validateForm()) {
-      try {
-        setLoading(true);
-        
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email: formData.email,
-          password: formData.password,
-          options: {
-            data: {
-              role: 'admin',
-            }
-          }
-        });
+    if (!validateForm()) return;
 
-        if (authError) throw authError;
+    try {
+      setLoading(true);
+      const { data, error } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+        options: {
+          data: {
+            role: 'admin',
+            signup_date: new Date().toISOString(),
+            hostel_name: formData.hostelName, // Store temporarily in user_metadata
+          },
+        },
+      });
 
-        Alert.alert(
-          'Success', 
-          'Account created successfully. Please check your email.',
-          [{ text: 'OK', onPress: () => router.back() }]
-        );
-      } catch (error: any) {
-        console.error('Signup Error:', error);
-        Alert.alert('Error', error.message);
-      } finally {
-        setLoading(false);
-      }
+      if (error) throw error;
+
+      // Store signup details temporarily (optional, if not using user_metadata)
+      await AsyncStorage.setItem('pendingAdminProfile', JSON.stringify({
+        email: formData.email,
+        hostelName: formData.hostelName,
+      }));
+
+      Alert.alert(
+        'Success',
+        'Admin account created successfully. Please check your email and log in to complete your profile.',
+        [{ text: 'OK', onPress: () => router.push('/(auth)/admin') }]
+      );
+    } catch (error: any) {
+      console.error('Signup Error:', error);
+      Alert.alert('Error', error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -109,19 +134,31 @@ export default function AdminSignup() {
           onChangeText={(text) => setFormData({ ...formData, confirmPassword: text })}
         />
         {errors.confirmPassword ? <Text style={styles.errorText}>{errors.confirmPassword}</Text> : null}
+
+        <TextInput
+          style={styles.input}
+          placeholder="Hostel Name"
+          value={formData.hostelName}
+          onChangeText={(text) => setFormData({ ...formData, hostelName: text })}
+        />
+        {errors.hostelName ? <Text style={styles.errorText}>{errors.hostelName}</Text> : null}
       </View>
 
-      <TouchableOpacity 
-        style={[styles.button, loading && styles.buttonDisabled]} 
-        onPress={handleSignup} 
+      <TouchableOpacity
+        style={[styles.button, loading && styles.buttonDisabled]}
+        onPress={handleSignup}
         disabled={loading}
       >
-        <Text style={styles.buttonText}>{loading ? 'Signing Up...' : 'Sign Up'}</Text>
+        {loading ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Sign Up</Text>
+        )}
       </TouchableOpacity>
 
       <View style={styles.loginContainer}>
         <Text style={styles.loginText}>Already have an account? </Text>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => router.push('/(auth)/admin')}>
           <Text style={styles.loginLink}>Login</Text>
         </TouchableOpacity>
       </View>
@@ -132,7 +169,7 @@ export default function AdminSignup() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F5F7F5',
     padding: 20,
     alignItems: 'center',
     justifyContent: 'center',
@@ -141,6 +178,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontFamily: 'Aeonik-Bold',
     marginBottom: 30,
+    color: '#4A7043',
   },
   inputContainer: {
     width: '100%',
@@ -163,11 +201,15 @@ const styles = StyleSheet.create({
     marginTop: -10,
   },
   button: {
-    backgroundColor: '#B3D8A8',
+    backgroundColor: '#4A7043',
     padding: 15,
     borderRadius: 8,
     width: '100%',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   buttonDisabled: {
     backgroundColor: '#cccccc',
@@ -186,7 +228,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Aeonik-Regular',
   },
   loginLink: {
-    color: '#B3D8A8',
+    color: '#4A7043',
     fontFamily: 'Aeonik-Medium',
   },
 });

@@ -1,3 +1,4 @@
+// app/(student)/dashboard.tsx
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
@@ -27,10 +28,7 @@ export default function StudentDashboard() {
   const loadData = async () => {
     try {
       setLoading(true);
-      await Promise.all([
-        fetchStudentData(),
-        fetchStudentStats(),
-      ]);
+      await Promise.all([fetchStudentData(), fetchStudentStats()]);
     } catch (error) {
       console.error('Error loading dashboard:', error);
       Alert.alert('Error', 'Failed to load dashboard data');
@@ -68,9 +66,28 @@ export default function StudentDashboard() {
         .eq('student_id', user.id)
         .eq('status', 'pending');
 
+      const { count: presentCount } = await supabase
+        .from('attendance')
+        .select('*', { count: 'exact' })
+        .eq('student_id', user.id)
+        .eq('status', 'present');
+
+      const { count: totalCount } = await supabase
+        .from('attendance')
+        .select('*', { count: 'exact' })
+        .eq('student_id', user.id);
+
+      // Ensure presentCount and totalCount are numbers, default to 0 if null
+      const safePresentCount = presentCount ?? 0;
+      const safeTotalCount = totalCount ?? 0;
+
+      const attendancePercentage = safeTotalCount > 0
+        ? Math.round((safePresentCount / safeTotalCount) * 100)
+        : 0;
+
       setStats({
-        totalAttendance: 85, // Example static value
-        activeComplaints: complaintsCount || 0,
+        totalAttendance: attendancePercentage,
+        activeComplaints: complaintsCount ?? 0, // Also handle null for complaintsCount
       });
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -108,13 +125,28 @@ export default function StudentDashboard() {
           </TouchableOpacity>
         </View>
 
+        {/* Navigation Tabs */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={styles.tabButton}
+            onPress={() => router.push('/(student)/dashboard')}
+          >
+            <Text style={styles.tabText}>Home</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.tabButton}
+            onPress={() => router.push('/(student)/attendance')}
+          >
+            <Text style={styles.tabText}>Attendance</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Stats Cards */}
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{stats.totalAttendance}%</Text>
             <Text style={styles.statLabel}>Attendance</Text>
           </View>
-
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{stats.activeComplaints}</Text>
             <Text style={styles.statLabel}>Active Complaints</Text>
@@ -152,7 +184,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 20,
     marginTop: 40,
   },
   welcomeText: {
@@ -161,6 +193,21 @@ const styles = StyleSheet.create({
   },
   signOutText: {
     color: '#B3D8A8',
+    fontFamily: 'Aeonik-Medium',
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    gap: 15,
+    marginBottom: 20,
+  },
+  tabButton: {
+    backgroundColor: '#B3D8A8',
+    padding: 10,
+    borderRadius: 8,
+  },
+  tabText: {
+    color: '#333',
+    fontSize: 16,
     fontFamily: 'Aeonik-Medium',
   },
   text: {

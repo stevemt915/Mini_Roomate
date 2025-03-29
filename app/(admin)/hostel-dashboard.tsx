@@ -7,7 +7,7 @@ type Student = {
   id: string;
   full_name: string;
   room_number?: string;
-  attendance_percentage?: number;
+  attendance_percentage: number; // Made non-optional for clarity
   pending_complaints: number;
 };
 
@@ -28,11 +28,7 @@ export default function AdminDashboard() {
   const loadData = async () => {
     try {
       setLoading(true);
-      await Promise.all([
-        fetchAdminData(),
-        fetchDashboardStats(),
-        fetchStudents()
-      ]);
+      await Promise.all([fetchAdminData(), fetchDashboardStats(), fetchStudents()]);
     } catch (error) {
       console.error('Error loading dashboard:', error);
       Alert.alert('Error', 'Failed to load dashboard data');
@@ -50,7 +46,7 @@ export default function AdminDashboard() {
         .from('admin_profiles')
         .select('*')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle(); // Use maybeSingle to handle no profile
 
       if (error) throw error;
       setAdminProfile(profile);
@@ -61,26 +57,48 @@ export default function AdminDashboard() {
 
   const fetchStudents = async () => {
     try {
-      const { data, error } = await supabase
+      // Fetch student profiles
+      const { data: studentData, error: studentError } = await supabase
         .from('student_profiles')
-        .select(`
-          id,
-          full_name,
-          room_number,
-          attendance_percentage,
-          complaints (count)
-        `)
-        .eq('complaints.status', 'pending');
+        .select('id, full_name, room_number, user_id');
 
-      if (error) throw error;
-      
-      const formattedStudents: Student[] = (data || []).map(student => ({
-        id: student.id,
-        full_name: student.full_name,
-        room_number: student.room_number,
-        attendance_percentage: student.attendance_percentage,
-        pending_complaints: student.complaints?.[0]?.count || 0
-      }));
+      if (studentError) throw studentError;
+
+      // Fetch attendance counts
+      const { data: attendanceData, error: attendanceError } = await supabase
+        .from('attendance')
+        .select('student_id, status');
+
+      if (attendanceError) throw attendanceError;
+
+      // Fetch pending complaints count
+      const { data: complaintsData, error: complaintsError } = await supabase
+        .from('complaints')
+        .select('student_id')
+        .eq('status', 'pending');
+
+      if (complaintsError) throw complaintsError;
+
+      const formattedStudents: Student[] = (studentData || []).map((student) => {
+        const attendanceRecords = (attendanceData || []).filter(
+          (a) => a.student_id === student.user_id
+        );
+        const presentCount = attendanceRecords.filter((a) => a.status === 'present').length;
+        const totalCount = attendanceRecords.length;
+        const attendancePercentage = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
+
+        const pendingComplaints = (complaintsData || []).filter(
+          (c) => c.student_id === student.user_id
+        ).length;
+
+        return {
+          id: student.id,
+          full_name: student.full_name,
+          room_number: student.room_number,
+          attendance_percentage: attendancePercentage,
+          pending_complaints: pendingComplaints,
+        };
+      });
 
       setStudents(formattedStudents);
     } catch (error) {
@@ -129,41 +147,53 @@ export default function AdminDashboard() {
   return (
     <ScrollView style={styles.scrollView}>
       <View style={styles.container}>
-        {/* Profile Section */}
         <View style={styles.profileSection}>
           <Text style={styles.welcomeText}>
-            Welcome, {adminProfile?.hostel_name}
+            Welcome, {adminProfile?.hostel_name || 'Admin'}
           </Text>
           <TouchableOpacity onPress={handleSignOut}>
             <Text style={styles.signOutText}>Sign Out</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Stats Cards */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={styles.tabButton}
+            onPress={() => router.push('/(admin)/hostel-dashboard')}
+          >
+            <Text style={styles.tabText}>Home</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.tabButton}
+            onPress={() => router.push('/(admin)/attendance')}
+          >
+            <Text style={styles.tabText}>Attendance</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{stats.totalStudents}</Text>
             <Text style={styles.statLabel}>Total Students</Text>
           </View>
-
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{stats.totalComplaints}</Text>
             <Text style={styles.statLabel}>Active Complaints</Text>
           </View>
         </View>
 
-        {/* Students List */}
         <Text style={styles.sectionTitle}>Student Overview</Text>
         {students.map((student) => (
           <View key={student.id} style={styles.studentCard}>
             <View style={styles.studentHeader}>
               <Text style={styles.studentName}>{student.full_name}</Text>
-              <Text style={styles.roomNumber}>Room {student.room_number || 'Not Assigned'}</Text>
+              <Text style={styles.roomNumber}>
+                Room {student.room_number || 'Not Assigned'}
+              </Text>
             </View>
-            
             <View style={styles.studentStats}>
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>{student.attendance_percentage || 0}%</Text>
+                <Text style={styles.statValue}>{student.attendance_percentage}%</Text>
                 <Text style={styles.statLabel}>Attendance</Text>
               </View>
               <View style={styles.statItem}>
@@ -193,7 +223,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 30,
-    marginTop: 40, // Added top margin
+    marginTop: 40,
   },
   welcomeText: {
     fontSize: 24,
@@ -201,6 +231,21 @@ const styles = StyleSheet.create({
   },
   signOutText: {
     color: '#B3D8A8',
+    fontFamily: 'Aeonik-Medium',
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    gap: 15,
+    marginBottom: 20,
+  },
+  tabButton: {
+    backgroundColor: '#B3D8A8',
+    padding: 10,
+    borderRadius: 8,
+  },
+  tabText: {
+    color: '#333',
+    fontSize: 16,
     fontFamily: 'Aeonik-Medium',
   },
   text: {
