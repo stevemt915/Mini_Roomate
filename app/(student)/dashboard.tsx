@@ -1,5 +1,4 @@
-// app/(student)/dashboard.tsx
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
@@ -8,22 +7,49 @@ type StudentProfile = {
   id: string;
   full_name: string;
   room_number: string;
-  attendance_percentage: number;
-  total_complaints: number;
+  user_id: string;
 };
 
 export default function StudentDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [studentProfile, setStudentProfile] = useState<StudentProfile | null>(null);
   const [stats, setStats] = useState({
     totalAttendance: 0,
     activeComplaints: 0,
+    resolvedComplaints: 0,
   });
 
   useEffect(() => {
     loadData();
+    setupRealtime();
+    
+    return () => {
+      supabase.removeAllChannels();
+    };
   }, []);
+
+  const setupRealtime = () => {
+    const channel = supabase
+      .channel('student_updates')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance' },
+        () => fetchStudentStats()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'complaints' },
+        () => fetchStudentStats()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications' },
+        () => fetchStudentStats()
+      )
+      .subscribe();
+  };
 
   const loadData = async () => {
     try {
@@ -60,12 +86,7 @@ export default function StudentDashboard() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No user found');
 
-      const { count: complaintsCount } = await supabase
-        .from('complaints')
-        .select('*', { count: 'exact' })
-        .eq('student_id', user.id)
-        .eq('status', 'pending');
-
+      // Get attendance stats
       const { count: presentCount } = await supabase
         .from('attendance')
         .select('*', { count: 'exact' })
@@ -77,21 +98,37 @@ export default function StudentDashboard() {
         .select('*', { count: 'exact' })
         .eq('student_id', user.id);
 
-      // Ensure presentCount and totalCount are numbers, default to 0 if null
-      const safePresentCount = presentCount ?? 0;
-      const safeTotalCount = totalCount ?? 0;
+      // Get complaint stats
+      const { count: activeComplaints } = await supabase
+        .from('complaints')
+        .select('*', { count: 'exact' })
+        .eq('student_id', user.id)
+        .eq('status', 'pending');
 
-      const attendancePercentage = safeTotalCount > 0
-        ? Math.round((safePresentCount / safeTotalCount) * 100)
+      const { count: resolvedComplaints } = await supabase
+        .from('complaints')
+        .select('*', { count: 'exact' })
+        .eq('student_id', user.id)
+        .eq('status', 'resolved');
+
+      const attendancePercentage = totalCount && totalCount > 0
+        ? Math.round(((presentCount || 0) / totalCount) * 100)
         : 0;
 
       setStats({
         totalAttendance: attendancePercentage,
-        activeComplaints: complaintsCount ?? 0, // Also handle null for complaintsCount
+        activeComplaints: activeComplaints || 0,
+        resolvedComplaints: resolvedComplaints || 0,
       });
     } catch (error) {
       console.error('Error fetching stats:', error);
     }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
   };
 
   const handleSignOut = async () => {
@@ -104,7 +141,7 @@ export default function StudentDashboard() {
     }
   };
 
-  if (loading) {
+  if (loading && !refreshing) {
     return (
       <View style={styles.container}>
         <Text style={styles.text}>Loading...</Text>
@@ -113,12 +150,17 @@ export default function StudentDashboard() {
   }
 
   return (
-    <ScrollView style={styles.scrollView}>
+    <ScrollView 
+      style={styles.scrollView}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
+    >
       <View style={styles.container}>
         {/* Profile Section */}
         <View style={styles.profileSection}>
           <Text style={styles.welcomeText}>
-            Welcome, {studentProfile?.full_name}
+            Welcome, {studentProfile?.full_name || 'Student'}
           </Text>
           <TouchableOpacity onPress={handleSignOut}>
             <Text style={styles.signOutText}>Sign Out</Text>
@@ -128,7 +170,7 @@ export default function StudentDashboard() {
         {/* Navigation Tabs */}
         <View style={styles.tabContainer}>
           <TouchableOpacity
-            style={styles.tabButton}
+            style={[styles.tabButton, styles.activeTab]}
             onPress={() => router.push('/(student)/dashboard')}
           >
             <Text style={styles.tabText}>Home</Text>
@@ -139,6 +181,18 @@ export default function StudentDashboard() {
           >
             <Text style={styles.tabText}>Attendance</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.tabButton}
+            onPress={() => router.push('/(student)/complaint')}
+          >
+            <Text style={styles.tabText}>Complaints</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.tabButton}
+            onPress={() => router.push('/(student)/notifications')}
+          >
+            <Text style={styles.tabText}>Notifications</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Stats Cards */}
@@ -146,11 +200,35 @@ export default function StudentDashboard() {
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{stats.totalAttendance}%</Text>
             <Text style={styles.statLabel}>Attendance</Text>
+            {stats.totalAttendance < 75 && (
+              <Text style={styles.warningText}>Low attendance!</Text>
+            )}
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{stats.activeComplaints}</Text>
             <Text style={styles.statLabel}>Active Complaints</Text>
           </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statNumber}>{stats.resolvedComplaints}</Text>
+            <Text style={styles.statLabel}>Resolved Complaints</Text>
+          </View>
+        </View>
+
+        {/* Quick Actions */}
+        <Text style={styles.sectionTitle}>Quick Actions</Text>
+        <View style={styles.actionsContainer}>
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => router.push('/(student)/complaint')}
+          >
+            <Text style={styles.actionButtonText}>Submit Complaint</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => router.push('/(student)/attendance')}
+          >
+            <Text style={styles.actionButtonText}>View Attendance</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Student Info */}
@@ -162,7 +240,7 @@ export default function StudentDashboard() {
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Student ID:</Text>
-            <Text style={styles.infoValue}>{studentProfile?.id}</Text>
+            <Text style={styles.infoValue}>{studentProfile?.id || 'N/A'}</Text>
           </View>
         </View>
       </View>
@@ -173,12 +251,12 @@ export default function StudentDashboard() {
 const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F5F7F5',
   },
   container: {
     flex: 1,
-    backgroundColor: '#fff',
     padding: 20,
+    backgroundColor: '#F5F7F5',
   },
   profileSection: {
     flexDirection: 'row',
@@ -190,24 +268,31 @@ const styles = StyleSheet.create({
   welcomeText: {
     fontSize: 24,
     fontFamily: 'Aeonik-Bold',
+    color: '#2F4F2F',
   },
   signOutText: {
-    color: '#B3D8A8',
+    color: '#4A7043',
     fontFamily: 'Aeonik-Medium',
+    fontSize: 16,
   },
   tabContainer: {
     flexDirection: 'row',
-    gap: 15,
+    flexWrap: 'wrap',
+    gap: 10,
     marginBottom: 20,
   },
   tabButton: {
-    backgroundColor: '#B3D8A8',
-    padding: 10,
-    borderRadius: 8,
+    backgroundColor: '#E0E8DF',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 20,
+  },
+  activeTab: {
+    backgroundColor: '#4A7043',
   },
   tabText: {
     color: '#333',
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: 'Aeonik-Medium',
   },
   text: {
@@ -216,44 +301,78 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   statsContainer: {
-    width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 15,
     marginBottom: 25,
   },
   statCard: {
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
+    flex: 1,
+    minWidth: 100,
+    backgroundColor: '#fff',
+    borderRadius: 12,
     padding: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   statNumber: {
     fontSize: 24,
     fontFamily: 'Aeonik-Bold',
-    color: '#B3D8A8',
+    color: '#4A7043',
     marginBottom: 5,
   },
   statLabel: {
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: 'Aeonik-Regular',
     color: '#666',
   },
+  warningText: {
+    fontSize: 12,
+    fontFamily: 'Aeonik-Medium',
+    color: '#F44336',
+    marginTop: 5,
+  },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontFamily: 'Aeonik-Bold',
+    color: '#2F4F2F',
     marginBottom: 15,
+  },
+  actionsContainer: {
+    flexDirection: 'row',
+    gap: 15,
+    marginBottom: 25,
+  },
+  actionButton: {
+    flex: 1,
+    backgroundColor: '#4A7043',
+    borderRadius: 8,
+    padding: 15,
+    alignItems: 'center',
+  },
+  actionButtonText: {
+    color: '#fff',
+    fontFamily: 'Aeonik-Medium',
+    fontSize: 14,
   },
   infoCard: {
     width: '100%',
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
+    backgroundColor: '#fff',
+    borderRadius: 12,
     padding: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },

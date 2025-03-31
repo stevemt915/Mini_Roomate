@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useSegments } from 'expo-router';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 
@@ -7,12 +7,15 @@ type Student = {
   id: string;
   full_name: string;
   room_number?: string;
-  attendance_percentage: number; // Made non-optional for clarity
+  attendance_percentage: number;
   pending_complaints: number;
 };
 
+type AdminTab = 'hostel-dashboard' | 'attendance' | 'complaints';
+
 export default function AdminDashboard() {
   const router = useRouter();
+  const segments = useSegments() as string[];
   const [loading, setLoading] = useState(true);
   const [adminProfile, setAdminProfile] = useState<any>(null);
   const [students, setStudents] = useState<Student[]>([]);
@@ -20,6 +23,10 @@ export default function AdminDashboard() {
     totalStudents: 0,
     totalComplaints: 0,
   });
+
+  const isTabActive = (tabName: AdminTab) => {
+    return segments.includes(tabName);
+  };
 
   useEffect(() => {
     loadData();
@@ -46,7 +53,7 @@ export default function AdminDashboard() {
         .from('admin_profiles')
         .select('*')
         .eq('user_id', user.id)
-        .maybeSingle(); // Use maybeSingle to handle no profile
+        .maybeSingle();
 
       if (error) throw error;
       setAdminProfile(profile);
@@ -57,21 +64,19 @@ export default function AdminDashboard() {
 
   const fetchStudents = async () => {
     try {
-      // Fetch student profiles
       const { data: studentData, error: studentError } = await supabase
         .from('student_profiles')
         .select('id, full_name, room_number, user_id');
 
       if (studentError) throw studentError;
+      if (!studentData) return;
 
-      // Fetch attendance counts
       const { data: attendanceData, error: attendanceError } = await supabase
         .from('attendance')
         .select('student_id, status');
 
       if (attendanceError) throw attendanceError;
 
-      // Fetch pending complaints count
       const { data: complaintsData, error: complaintsError } = await supabase
         .from('complaints')
         .select('student_id')
@@ -79,17 +84,14 @@ export default function AdminDashboard() {
 
       if (complaintsError) throw complaintsError;
 
-      const formattedStudents: Student[] = (studentData || []).map((student) => {
-        const attendanceRecords = (attendanceData || []).filter(
-          (a) => a.student_id === student.user_id
-        );
-        const presentCount = attendanceRecords.filter((a) => a.status === 'present').length;
-        const totalCount = attendanceRecords.length;
-        const attendancePercentage = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
+      const formattedStudents = studentData.map(student => {
+        const studentAttendance = attendanceData?.filter(a => a.student_id === student.user_id) || [];
+        const presentCount = studentAttendance.filter(a => a.status === 'present').length;
+        const attendancePercentage = studentAttendance.length > 0 
+          ? Math.round((presentCount / studentAttendance.length) * 100)
+          : 0;
 
-        const pendingComplaints = (complaintsData || []).filter(
-          (c) => c.student_id === student.user_id
-        ).length;
+        const pendingComplaints = complaintsData?.filter(c => c.student_id === student.user_id).length || 0;
 
         return {
           id: student.id,
@@ -103,6 +105,7 @@ export default function AdminDashboard() {
       setStudents(formattedStudents);
     } catch (error) {
       console.error('Error fetching students:', error);
+      Alert.alert('Error', 'Failed to load student data');
     }
   };
 
@@ -123,6 +126,7 @@ export default function AdminDashboard() {
       });
     } catch (error) {
       console.error('Error fetching stats:', error);
+      Alert.alert('Error', 'Failed to load dashboard statistics');
     }
   };
 
@@ -149,7 +153,7 @@ export default function AdminDashboard() {
       <View style={styles.container}>
         <View style={styles.profileSection}>
           <Text style={styles.welcomeText}>
-            Welcome, {adminProfile?.hostel_name || 'Admin'}
+            Welcome, {adminProfile?.full_name || 'Admin'}
           </Text>
           <TouchableOpacity onPress={handleSignOut}>
             <Text style={styles.signOutText}>Sign Out</Text>
@@ -158,16 +162,28 @@ export default function AdminDashboard() {
 
         <View style={styles.tabContainer}>
           <TouchableOpacity
-            style={styles.tabButton}
+            style={[styles.tabButton, isTabActive('hostel-dashboard') && styles.activeTab]}
             onPress={() => router.push('/(admin)/hostel-dashboard')}
           >
             <Text style={styles.tabText}>Home</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.tabButton}
+            style={[styles.tabButton, isTabActive('attendance') && styles.activeTab]}
             onPress={() => router.push('/(admin)/attendance')}
           >
             <Text style={styles.tabText}>Attendance</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.tabButton, 
+              isTabActive('complaints') && styles.activeTab,
+              stats.totalComplaints > 0 && styles.tabButtonAlert
+            ]}
+            onPress={() => router.push('/(admin)/complaints')}
+          >
+            <Text style={styles.tabText}>
+              Complaints {stats.totalComplaints > 0 && `(${stats.totalComplaints})`}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -178,7 +194,7 @@ export default function AdminDashboard() {
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{stats.totalComplaints}</Text>
-            <Text style={styles.statLabel}>Active Complaints</Text>
+            <Text style={styles.statLabel}>Pending Complaints</Text>
           </View>
         </View>
 
@@ -228,6 +244,7 @@ const styles = StyleSheet.create({
   welcomeText: {
     fontSize: 24,
     fontFamily: 'Aeonik-Bold',
+    color: '#333',
   },
   signOutText: {
     color: '#B3D8A8',
@@ -235,17 +252,28 @@ const styles = StyleSheet.create({
   },
   tabContainer: {
     flexDirection: 'row',
-    gap: 15,
+    gap: 10,
     marginBottom: 20,
   },
   tabButton: {
-    backgroundColor: '#B3D8A8',
+    backgroundColor: '#f0f0f0',
     padding: 10,
     borderRadius: 8,
+    flex: 1,
+    alignItems: 'center',
+  },
+  activeTab: {
+    backgroundColor: '#B3D8A8',
+    borderBottomWidth: 2,
+    borderBottomColor: '#4a8c5e',
+  },
+  tabButtonAlert: {
+    borderWidth: 1,
+    borderColor: '#ff6b6b',
   },
   tabText: {
     color: '#333',
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: 'Aeonik-Medium',
   },
   text: {
@@ -254,16 +282,22 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   statsContainer: {
-    width: '100%',
+    flexDirection: 'row',
     gap: 15,
     marginBottom: 25,
   },
   statCard: {
-    width: '100%',
+    flex: 1,
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#eee',
     borderRadius: 8,
     padding: 15,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   statNumber: {
     fontSize: 24,
@@ -272,7 +306,7 @@ const styles = StyleSheet.create({
     marginBottom: 5,
   },
   statLabel: {
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: 'Aeonik-Regular',
     color: '#666',
   },
@@ -280,14 +314,21 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontFamily: 'Aeonik-Bold',
     marginBottom: 15,
+    color: '#333',
   },
   studentCard: {
     width: '100%',
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#eee',
     borderRadius: 8,
     padding: 15,
     marginBottom: 15,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   studentHeader: {
     flexDirection: 'row',
@@ -309,7 +350,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     borderTopWidth: 1,
-    borderTopColor: '#ccc',
+    borderTopColor: '#eee',
     paddingTop: 10,
   },
   statItem: {

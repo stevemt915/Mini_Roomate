@@ -8,14 +8,14 @@ interface FormData {
   email: string;
   password: string;
   confirmPassword: string;
-  hostelName: string;
+  fullName: string;
 }
 
 interface Errors {
   email: string;
   password: string;
   confirmPassword: string;
-  hostelName: string;
+  fullName: string;
 }
 
 export default function AdminSignup() {
@@ -24,13 +24,13 @@ export default function AdminSignup() {
     email: '',
     password: '',
     confirmPassword: '',
-    hostelName: '',
+    fullName: '',
   });
   const [errors, setErrors] = useState<Errors>({
     email: '',
     password: '',
     confirmPassword: '',
-    hostelName: '',
+    fullName: '',
   });
   const [loading, setLoading] = useState<boolean>(false);
 
@@ -55,8 +55,8 @@ export default function AdminSignup() {
       isValid = false;
     }
 
-    if (!formData.hostelName.trim()) {
-      newErrors.hostelName = 'Hostel name is required';
+    if (!formData.fullName.trim()) {
+      newErrors.fullName = 'Full name is required';
       isValid = false;
     }
 
@@ -76,17 +76,16 @@ export default function AdminSignup() {
           data: {
             role: 'admin',
             signup_date: new Date().toISOString(),
-            hostel_name: formData.hostelName, // Store temporarily in user_metadata
+            full_name: formData.fullName,
           },
         },
       });
 
       if (error) throw error;
 
-      // Store signup details temporarily (optional, if not using user_metadata)
       await AsyncStorage.setItem('pendingAdminProfile', JSON.stringify({
         email: formData.email,
-        hostelName: formData.hostelName,
+        fullName: formData.fullName,
       }));
 
       Alert.alert(
@@ -137,11 +136,11 @@ export default function AdminSignup() {
 
         <TextInput
           style={styles.input}
-          placeholder="Hostel Name"
-          value={formData.hostelName}
-          onChangeText={(text) => setFormData({ ...formData, hostelName: text })}
+          placeholder="Full Name"
+          value={formData.fullName}
+          onChangeText={(text) => setFormData({ ...formData, fullName: text })}
         />
-        {errors.hostelName ? <Text style={styles.errorText}>{errors.hostelName}</Text> : null}
+        {errors.fullName ? <Text style={styles.errorText}>{errors.fullName}</Text> : null}
       </View>
 
       <TouchableOpacity

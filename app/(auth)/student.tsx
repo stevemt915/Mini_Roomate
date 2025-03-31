@@ -40,24 +40,41 @@ export default function StudentLogin() {
       // Check for pending profile data and insert it
       const pendingProfile = await AsyncStorage.getItem('pendingStudentProfile');
       if (pendingProfile && data.user) {
-        const { fullName, roomNumber } = JSON.parse(pendingProfile);
+        const { 
+          fullName, 
+          roomNumber, 
+          batch, 
+          hostelName, 
+          phoneNumber, 
+          dateOfBirth,
+          address
+        } = JSON.parse(pendingProfile);
+
+        // Insert the complete student profile
         const { error: profileError } = await supabase
           .from('student_profiles')
           .insert({
             user_id: data.user.id,
             full_name: fullName,
             room_number: roomNumber,
+            batch: batch,
+            hostel_name: hostelName,
+            phone_number: `+91${phoneNumber}`,
+            date_of_birth: dateOfBirth,
+            address: address
           });
 
         if (profileError) throw profileError;
 
+        // Clear the pending profile data
         await AsyncStorage.removeItem('pendingStudentProfile');
       }
 
+      // Redirect to student dashboard
       router.replace('/(student)/dashboard');
     } catch (error: any) {
       console.error('Login Error:', error);
-      Alert.alert('Error', error.message);
+      Alert.alert('Error', error.message || 'An error occurred during login');
     } finally {
       setLoading(false);
     }
@@ -98,11 +115,18 @@ export default function StudentLogin() {
       </TouchableOpacity>
 
       <View style={styles.signupContainer}>
-        <Text style={styles.signupText}>Don’t have an account? </Text>
+        <Text style={styles.signupText}>Don't have an account? </Text>
         <TouchableOpacity onPress={() => router.push('/(auth)/student-signup')}>
           <Text style={styles.signupLink}>Sign Up</Text>
         </TouchableOpacity>
       </View>
+
+      <TouchableOpacity 
+        style={styles.forgotPassword}
+        onPress={() => router.push('/(auth)/forgot-password')}
+      >
+        <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -165,5 +189,13 @@ const styles = StyleSheet.create({
   signupLink: {
     color: '#4A7043',
     fontFamily: 'Aeonik-Medium',
+  },
+  forgotPassword: {
+    marginTop: 15,
+  },
+  forgotPasswordText: {
+    color: '#4A7043',
+    fontFamily: 'Aeonik-Regular',
+    textDecorationLine: 'underline',
   },
 });

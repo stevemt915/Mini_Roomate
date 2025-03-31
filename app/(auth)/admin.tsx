@@ -11,7 +11,6 @@ export default function AdminLogin() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Check for pending profile data on mount
     const checkPendingProfile = async () => {
       const pendingProfile = await AsyncStorage.getItem('pendingAdminProfile');
       if (pendingProfile) {
@@ -37,15 +36,14 @@ export default function AdminLogin() {
 
       if (error) throw error;
 
-      // Check for pending profile data and insert it
       const pendingProfile = await AsyncStorage.getItem('pendingAdminProfile');
       if (pendingProfile && data.user) {
-        const { hostelName } = JSON.parse(pendingProfile);
+        const { fullName } = JSON.parse(pendingProfile);
         const { error: profileError } = await supabase
           .from('admin_profiles')
           .insert({
             user_id: data.user.id,
-            hostel_name: hostelName,
+            full_name: fullName,
           });
 
         if (profileError) throw profileError;
@@ -97,7 +95,7 @@ export default function AdminLogin() {
       </TouchableOpacity>
 
       <View style={styles.signupContainer}>
-        <Text style={styles.signupText}>Don’t have an account? </Text>
+        <Text style={styles.signupText}>Don't have an account? </Text>
         <TouchableOpacity onPress={() => router.push('/(auth)/admin-signup')}>
           <Text style={styles.signupLink}>Sign Up</Text>
         </TouchableOpacity>
