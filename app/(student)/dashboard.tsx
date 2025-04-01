@@ -1,5 +1,11 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, RefreshControl, Button, Modal, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
+
+// Utility function to format dates
+const formatDate = (dateString: string): string => {
+  const options: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'long', day: 'numeric' };
+  return new Date(dateString).toLocaleDateString(undefined, options);
+};
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 
@@ -162,6 +168,38 @@ export default function StudentDashboard() {
       router.replace('/(auth)/student');
     } catch (error: any) {
       Alert.alert('Error', error.message);
+    }
+  };
+
+  const handlePayment = async () => {
+    if (!amount || isNaN(parseFloat(amount)) || !description) {
+      Alert.alert('Error', 'Please enter a valid amount and description.');
+      return;
+    }
+  
+    try {
+      const { data, error } = await supabase
+        .from('transactions')
+        .insert([
+          {
+            date: new Date().toISOString().split('T')[0], // Current date
+            description,
+            amount: parseFloat(amount),
+            user_id: userId,
+          },
+        ]);
+  
+      if (error) {
+        Alert.alert('Error', error.message);
+      } else {
+        Alert.alert('Success', 'Payment recorded successfully!');
+        setAmount('');
+        setDescription('');
+        setPaymentModalVisible(false);
+      }
+    } catch (error) {
+      console.error('Error processing payment:', error);
+      Alert.alert('Error', 'Failed to process payment.');
     }
   };
 
