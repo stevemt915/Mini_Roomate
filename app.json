@@ -8,14 +8,35 @@
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos for profile picture uploads",
+        "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to use your camera for profile pictures",
+        "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to use microphone when recording videos"
+      },
+      "bundleIdentifier": "com.yourcompany.roommate"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.CAMERA"
+      ],
+      "package": "com.yourcompany.roommate"
     },
     "web": {
       "bundler": "metro",
@@ -32,10 +53,31 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos for profile pictures",
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera for profile pictures"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to use your camera"
+        }
       ]
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": true,
+      "tsconfigPaths": true
+    },
+    "extra": {
+      "supabaseUrl": "https://svoxmassmgzdebagmcnf.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN2b3htYXNzbWd6ZGViYWdtY25mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDA5NDgxMDQsImV4cCI6MjA1NjUyNDEwNH0.7Sb1mUeDGuF92p6QdKY-8pkJ1yKjV41ZUEc48qtdIhA",
+      "eas": {
+        "projectId": "your-eas-project-id"
+      }
     },
     "fonts": [
       {

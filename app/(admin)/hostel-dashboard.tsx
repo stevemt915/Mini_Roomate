@@ -11,9 +11,9 @@ type Student = {
   pending_complaints: number;
 };
 
-type AdminTab = 'hostel-dashboard' | 'attendance' | 'complaints';
+type AdminTab = 'hostel-dashboard' | 'attendance' | 'complaints' | 'profile';
 
-export default function AdminDashboard() {
+export default function HostelDashboard() {
   const router = useRouter();
   const segments = useSegments() as string[];
   const [loading, setLoading] = useState(true);
@@ -23,9 +23,10 @@ export default function AdminDashboard() {
     totalStudents: 0,
     totalComplaints: 0,
   });
+  const [activeTab, setActiveTab] = useState<AdminTab>('hostel-dashboard');
 
   const isTabActive = (tabName: AdminTab) => {
-    return segments.includes(tabName);
+    return activeTab === tabName;
   };
 
   useEffect(() => {
@@ -163,7 +164,7 @@ export default function AdminDashboard() {
         <View style={styles.tabContainer}>
           <TouchableOpacity
             style={[styles.tabButton, isTabActive('hostel-dashboard') && styles.activeTab]}
-            onPress={() => router.push('/(admin)/hostel-dashboard')}
+            onPress={() => setActiveTab('hostel-dashboard')}
           >
             <Text style={styles.tabText}>Home</Text>
           </TouchableOpacity>
@@ -175,7 +176,7 @@ export default function AdminDashboard() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[
-              styles.tabButton, 
+              styles.tabButton,
               isTabActive('complaints') && styles.activeTab,
               stats.totalComplaints > 0 && styles.tabButtonAlert
             ]}
@@ -185,40 +186,82 @@ export default function AdminDashboard() {
               Complaints {stats.totalComplaints > 0 && `(${stats.totalComplaints})`}
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabButton, isTabActive('profile') && styles.activeTab]}
+            onPress={() => setActiveTab('profile')}
+          >
+            <Text style={styles.tabText}>Profile</Text>
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{stats.totalStudents}</Text>
-            <Text style={styles.statLabel}>Total Students</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{stats.totalComplaints}</Text>
-            <Text style={styles.statLabel}>Pending Complaints</Text>
-          </View>
-        </View>
-
-        <Text style={styles.sectionTitle}>Student Overview</Text>
-        {students.map((student) => (
-          <View key={student.id} style={styles.studentCard}>
-            <View style={styles.studentHeader}>
-              <Text style={styles.studentName}>{student.full_name}</Text>
-              <Text style={styles.roomNumber}>
-                Room {student.room_number || 'Not Assigned'}
+        {activeTab === 'profile' ? (
+          <View style={styles.profileCard}>
+            <Text style={styles.sectionTitle}>Profile Details</Text>
+            <View style={styles.profileItem}>
+              <Text style={styles.label}>Full Name:</Text>
+              <Text style={styles.value}>{adminProfile?.full_name || 'Not provided'}</Text>
+            </View>
+            <View style={styles.profileItem}>
+              <Text style={styles.label}>Hostel Name:</Text>
+              <Text style={styles.value}>{adminProfile?.hostel_name || 'Not provided'}</Text>
+            </View>
+            <View style={styles.profileItem}>
+              <Text style={styles.label}>Phone Number:</Text>
+              <Text style={styles.value}>{adminProfile?.phone_number || 'Not provided'}</Text>
+            </View>
+            <View style={styles.profileItem}>
+              <Text style={styles.label}>Birth Date:</Text>
+              <Text style={styles.value}>
+                {adminProfile?.birth_date ? new Date(adminProfile.birth_date).toLocaleDateString() : 'Not provided'}
               </Text>
             </View>
-            <View style={styles.studentStats}>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{student.attendance_percentage}%</Text>
-                <Text style={styles.statLabel}>Attendance</Text>
+            <View style={styles.profileItem}>
+              <Text style={styles.label}>Address:</Text>
+              <Text style={styles.value}>{adminProfile?.address || 'Not provided'}</Text>
+            </View>
+            <TouchableOpacity 
+              style={styles.editButton}
+              onPress={() => router.push('/(admin)/edit-profile')}
+            >
+              <Text style={styles.editButtonText}>Edit Profile</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            <View style={styles.statsContainer}>
+              <View style={styles.statCard}>
+                <Text style={styles.statNumber}>{stats.totalStudents}</Text>
+                <Text style={styles.statLabel}>Total Students</Text>
               </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{student.pending_complaints}</Text>
-                <Text style={styles.statLabel}>Complaints</Text>
+              <View style={styles.statCard}>
+                <Text style={styles.statNumber}>{stats.totalComplaints}</Text>
+                <Text style={styles.statLabel}>Pending Complaints</Text>
               </View>
             </View>
-          </View>
-        ))}
+
+            <Text style={styles.sectionTitle}>Student Overview</Text>
+            {students.map((student) => (
+              <View key={student.id} style={styles.studentCard}>
+                <View style={styles.studentHeader}>
+                  <Text style={styles.studentName}>{student.full_name}</Text>
+                  <Text style={styles.roomNumber}>
+                    Room {student.room_number || 'Not Assigned'}
+                  </Text>
+                </View>
+                <View style={styles.studentStats}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statValue}>{student.attendance_percentage}%</Text>
+                    <Text style={styles.statLabel}>Attendance</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statValue}>{student.pending_complaints}</Text>
+                    <Text style={styles.statLabel}>Complaints</Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </>
+        )}
       </View>
     </ScrollView>
   );
@@ -360,5 +403,45 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontFamily: 'Aeonik-Bold',
     color: '#B3D8A8',
+  },
+  profileCard: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 8,
+    padding: 20,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  profileItem: {
+    marginBottom: 15,
+  },
+  label: {
+    fontSize: 14,
+    fontFamily: 'Aeonik-Regular',
+    color: '#666',
+    marginBottom: 5,
+  },
+  value: {
+    fontSize: 16,
+    fontFamily: 'Aeonik-Medium',
+    color: '#333',
+  },
+  editButton: {
+    backgroundColor: '#4A7043',
+    padding: 15,
+    borderRadius: 8,
+    width: '100%',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  editButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontFamily: 'Aeonik-Medium',
   },
 });
