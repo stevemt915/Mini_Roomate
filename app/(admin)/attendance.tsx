@@ -1,36 +1,54 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, FlatList } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, FlatList, TextInput } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useRouter } from 'expo-router';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { MaterialIcons } from '@expo/vector-icons';
 
-// Define student type for clarity
 type Student = {
-  user_id: string; // Maps to student_id in attendance
+  user_id: string;
   full_name: string;
   room_number: string;
   status: 'present' | 'absent' | null;
+};
+
+type AttendanceRecord = {
+  student_id: string;
+  date: string;
+  status: 'present' | 'absent';
+  marked_by: string;
 };
 
 export default function Attendance() {
   const router = useRouter();
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [roomFilter, setRoomFilter] = useState('');
+  const [viewMode, setViewMode] = useState<'mark' | 'view'>('mark');
 
-  // Fetch students on component mount
+  // Fetch students and attendance data
   useEffect(() => {
     fetchStudents();
-  }, []);
+    if (viewMode === 'view') {
+      fetchAttendanceData();
+    }
+  }, [selectedDate, viewMode]);
 
-  // Retrieve student data from student_profiles
   const fetchStudents = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('student_profiles')
-        .select('user_id, full_name, room_number');
+      let query = supabase.from('student_profiles').select('user_id, full_name, room_number');
+      
+      if (roomFilter) {
+        query = query.eq('room_number', roomFilter);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
 
-      // Initialize each student with no status
       const initializedStudents = data.map((student: any) => ({
         ...student,
         status: null,
@@ -43,28 +61,83 @@ export default function Attendance() {
     }
   };
 
-  // Update student status in local state
+  const fetchAttendanceData = async () => {
+    try {
+      setLoading(true);
+      const dateStr = selectedDate.toISOString().split('T')[0];
+      
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('student_id, status')
+        .eq('date', dateStr);
+
+      if (error) throw error;
+
+      setStudents(prevStudents => 
+        prevStudents.map(student => {
+          const record = data.find((r: any) => r.student_id === student.user_id);
+          return {
+            ...student,
+            status: record?.status || null
+          };
+        })
+      );
+    } catch (error: any) {
+      Alert.alert('Error', `Failed to fetch attendance: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const markAttendance = (user_id: string, status: 'present' | 'absent') => {
-    setStudents((prevStudents) =>
-      prevStudents.map((student) =>
+    setStudents(prevStudents =>
+      prevStudents.map(student =>
         student.user_id === user_id ? { ...student, status } : student
       )
     );
   };
 
-  // Save attendance records to Supabase
+  const markAll = (status: 'present' | 'absent') => {
+    setStudents(prevStudents =>
+      prevStudents.map(student => ({
+        ...student,
+        status
+      }))
+    );
+  };
+
   const saveAttendance = async () => {
+    try {
+      const unmarkedStudents = students.filter(s => s.status === null);
+      if (unmarkedStudents.length > 0) {
+        Alert.alert(
+          'Incomplete Attendance',
+          `You have ${unmarkedStudents.length} unmarked students. Are you sure you want to proceed?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Save Anyway', onPress: () => confirmSaveAttendance() }
+          ]
+        );
+      } else {
+        await confirmSaveAttendance();
+      }
+    } catch (error: any) {
+      Alert.alert('Error', `Failed to save attendance: ${error.message}`);
+    }
+  };
+
+  const confirmSaveAttendance = async () => {
     try {
       setLoading(true);
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) throw new Error('Admin not authenticated');
 
-      const today = new Date().toISOString().split('T')[0];
+      const dateStr = selectedDate.toISOString().split('T')[0];
       const attendanceRecords = students
-        .filter((student) => student.status !== null)
-        .map((student) => ({
+        .filter(student => student.status !== null)
+        .map(student => ({
           student_id: student.user_id,
-          date: today,
+          date: dateStr,
           status: student.status,
           marked_by: user.id,
         }));
@@ -86,7 +159,12 @@ export default function Attendance() {
     }
   };
 
-  // Render each student row with room, name, status buttons, and date
+  const filteredStudents = students.filter(student => {
+    const matchesSearch = student.full_name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                         student.room_number.includes(searchQuery);
+    return matchesSearch;
+  });
+
   const renderStudent = ({ item }: { item: Student }) => (
     <View style={styles.studentRow}>
       <Text style={styles.roomCell}>{item.room_number}</Text>
@@ -94,58 +172,156 @@ export default function Attendance() {
         {item.full_name}
       </Text>
       <View style={styles.statusContainer}>
-        <TouchableOpacity
-          style={[
-            styles.statusButton,
-            item.status === 'present' && styles.presentButton,
-          ]}
-          onPress={() => markAttendance(item.user_id, 'present')}
-        >
-          <Text style={styles.buttonText}>Present</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.statusButton,
-            item.status === 'absent' && styles.absentButton,
-          ]}
-          onPress={() => markAttendance(item.user_id, 'absent')}
-        >
-          <Text style={styles.buttonText}>Absent</Text>
-        </TouchableOpacity>
+        {viewMode === 'mark' ? (
+          <>
+            <TouchableOpacity
+              style={[
+                styles.statusButton,
+                item.status === 'present' && styles.presentButton,
+              ]}
+              onPress={() => markAttendance(item.user_id, 'present')}
+            >
+              <Text style={styles.buttonText}>Present</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.statusButton,
+                item.status === 'absent' && styles.absentButton,
+              ]}
+              onPress={() => markAttendance(item.user_id, 'absent')}
+            >
+              <Text style={styles.buttonText}>Absent</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <Text style={[
+            styles.statusText,
+            item.status === 'present' && styles.presentText,
+            item.status === 'absent' && styles.absentText
+          ]}>
+            {item.status || 'Not marked'}
+          </Text>
+        )}
       </View>
-      <Text style={styles.dateCell}>{new Date().toISOString().split('T')[0]}</Text>
     </View>
   );
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Mark Attendance</Text>
+      <Text style={styles.title}>
+        {viewMode === 'mark' ? 'Mark Attendance' : 'View Attendance'}
+      </Text>
+
+      {/* Date Selection */}
+      <View style={styles.dateRow}>
+        <TouchableOpacity 
+          style={styles.dateButton}
+          onPress={() => setShowDatePicker(true)}
+        >
+          <Text style={styles.dateText}>
+            {selectedDate.toLocaleDateString()}
+          </Text>
+          <MaterialIcons name="edit-calendar" size={20} color="#4A7043" />
+        </TouchableOpacity>
+        
+        <View style={styles.viewToggle}>
+          <TouchableOpacity
+            style={[styles.toggleButton, viewMode === 'mark' && styles.activeToggle]}
+            onPress={() => setViewMode('mark')}
+          >
+            <Text style={styles.toggleText}>Mark</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleButton, viewMode === 'view' && styles.activeToggle]}
+            onPress={() => setViewMode('view')}
+          >
+            <Text style={styles.toggleText}>View</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {showDatePicker && (
+        <DateTimePicker
+          value={selectedDate}
+          mode="date"
+          display="default"
+          onChange={(event, date) => {
+            setShowDatePicker(false);
+            if (date) setSelectedDate(date);
+          }}
+        />
+      )}
+
+      {/* Filters */}
+      <View style={styles.filterRow}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search by name or room"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        <TextInput
+          style={styles.roomInput}
+          placeholder="Filter by room"
+          value={roomFilter}
+          onChangeText={setRoomFilter}
+          keyboardType="numeric"
+        />
+      </View>
+
+      {/* Bulk Actions */}
+      {viewMode === 'mark' && (
+        <View style={styles.bulkActions}>
+          <TouchableOpacity
+            style={styles.bulkButton}
+            onPress={() => markAll('present')}
+          >
+            <Text style={styles.bulkButtonText}>Mark All Present</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.bulkButton, styles.bulkAbsent]}
+            onPress={() => markAll('absent')}
+          >
+            <Text style={styles.bulkButtonText}>Mark All Absent</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Table Header */}
       <View style={styles.tableHeader}>
-        <Text style={styles.headerRoomCell}>Room No</Text>
+        <Text style={styles.headerRoomCell}>Room</Text>
         <Text style={styles.headerNameCell}>Name</Text>
         <Text style={styles.headerStatusCell}>Status</Text>
-        <Text style={styles.headerDateCell}>Date</Text>
       </View>
+
       {/* Student List */}
       {loading ? (
         <Text style={styles.loadingText}>Loading...</Text>
       ) : (
         <FlatList
-          data={students}
+          data={filteredStudents}
           renderItem={renderStudent}
           keyExtractor={(item) => item.user_id}
-          ListEmptyComponent={<Text style={styles.emptyText}>No students found</Text>}
+          ListEmptyComponent={
+            <Text style={styles.emptyText}>
+              {students.length === 0 ? 'No students found' : 'No matching students'}
+            </Text>
+          }
         />
       )}
+
       {/* Save Button */}
-      <TouchableOpacity
-        style={[styles.saveButton, loading && styles.buttonDisabled]}
-        onPress={saveAttendance}
-        disabled={loading}
-      >
-        <Text style={styles.saveButtonText}>Save Attendance</Text>
-      </TouchableOpacity>
+      {viewMode === 'mark' && (
+        <TouchableOpacity
+          style={[styles.saveButton, loading && styles.buttonDisabled]}
+          onPress={saveAttendance}
+          disabled={loading}
+        >
+          <Text style={styles.saveButtonText}>
+            Save Attendance for {selectedDate.toLocaleDateString()}
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -162,6 +338,87 @@ const styles = StyleSheet.create({
     color: '#4A7043',
     marginBottom: 20,
     textAlign: 'center',
+  },
+  dateRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  dateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 10,
+    backgroundColor: '#E8F5E9',
+    borderRadius: 8,
+  },
+  dateText: {
+    fontSize: 16,
+    fontFamily: 'Aeonik-Medium',
+    color: '#2F4F2F',
+  },
+  viewToggle: {
+    flexDirection: 'row',
+    backgroundColor: '#E0E0E0',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  toggleButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+  },
+  activeToggle: {
+    backgroundColor: '#4A7043',
+  },
+  toggleText: {
+    fontFamily: 'Aeonik-Medium',
+    color: '#333',
+  },
+  activeToggleText: {
+    color: '#fff',
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 15,
+  },
+  searchInput: {
+    flex: 2,
+    backgroundColor: '#fff',
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#D3E0D3',
+    fontFamily: 'Aeonik-Regular',
+  },
+  roomInput: {
+    flex: 1,
+    backgroundColor: '#fff',
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#D3E0D3',
+    fontFamily: 'Aeonik-Regular',
+  },
+  bulkActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 15,
+  },
+  bulkButton: {
+    flex: 1,
+    padding: 10,
+    backgroundColor: '#4CAF50',
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  bulkAbsent: {
+    backgroundColor: '#F44336',
+  },
+  bulkButtonText: {
+    color: '#fff',
+    fontFamily: 'Aeonik-Medium',
   },
   tableHeader: {
     flexDirection: 'row',
@@ -187,13 +444,6 @@ const styles = StyleSheet.create({
   },
   headerStatusCell: {
     flex: 2,
-    fontSize: 16,
-    fontFamily: 'Aeonik-Medium',
-    color: '#2F4F2F',
-    textAlign: 'center',
-  },
-  headerDateCell: {
-    flex: 1.2,
     fontSize: 16,
     fontFamily: 'Aeonik-Medium',
     color: '#2F4F2F',
@@ -226,13 +476,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignItems: 'center',
   },
-  dateCell: {
-    flex: 1.2,
-    fontSize: 14,
-    fontFamily: 'Aeonik-Regular',
-    color: '#333',
-    textAlign: 'center',
-  },
   statusButton: {
     paddingVertical: 6,
     paddingHorizontal: 8,
@@ -251,6 +494,16 @@ const styles = StyleSheet.create({
     fontFamily: 'Aeonik-Medium',
     color: '#fff',
     textAlign: 'center',
+  },
+  statusText: {
+    fontSize: 14,
+    fontFamily: 'Aeonik-Medium',
+  },
+  presentText: {
+    color: '#4CAF50',
+  },
+  absentText: {
+    color: '#F44336',
   },
   saveButton: {
     padding: 15,

@@ -8,6 +8,11 @@ type StudentProfile = {
   full_name: string;
   room_number: string;
   user_id: string;
+  batch: string;
+  hostel_name: string;
+  phone_number: string;
+  date_of_birth: string;
+  address: string;
 };
 
 export default function StudentDashboard() {
@@ -141,6 +146,16 @@ export default function StudentDashboard() {
     }
   };
 
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
   if (loading && !refreshing) {
     return (
       <View style={styles.container}>
@@ -193,6 +208,12 @@ export default function StudentDashboard() {
           >
             <Text style={styles.tabText}>Notifications</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.tabButton}
+            onPress={() => router.push('/(student)/profile')}
+          >
+            <Text style={styles.tabText}>Profile</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Stats Cards */}
@@ -241,6 +262,26 @@ export default function StudentDashboard() {
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Student ID:</Text>
             <Text style={styles.infoValue}>{studentProfile?.id || 'N/A'}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Batch:</Text>
+            <Text style={styles.infoValue}>{studentProfile?.batch || 'N/A'}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Hostel:</Text>
+            <Text style={styles.infoValue}>{studentProfile?.hostel_name || 'N/A'}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Phone:</Text>
+            <Text style={styles.infoValue}>{studentProfile?.phone_number || 'N/A'}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Date of Birth:</Text>
+            <Text style={styles.infoValue}>{studentProfile?.date_of_birth ? formatDate(studentProfile.date_of_birth) : 'N/A'}</Text>
+          </View>
+          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+            <Text style={styles.infoLabel}>Address:</Text>
+            <Text style={[styles.infoValue, { textAlign: 'right', flex: 1 }]}>{studentProfile?.address || 'N/A'}</Text>
           </View>
         </View>
       </View>
@@ -368,6 +409,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    marginBottom: 20,
   },
   infoRow: {
     flexDirection: 'row',

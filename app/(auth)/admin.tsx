@@ -36,14 +36,26 @@ export default function AdminLogin() {
 
       if (error) throw error;
 
+      // Check for pending profile data and insert it
       const pendingProfile = await AsyncStorage.getItem('pendingAdminProfile');
       if (pendingProfile && data.user) {
-        const { fullName } = JSON.parse(pendingProfile);
+        const { 
+          fullName, 
+          hostelName, 
+          phoneNumber, 
+          birthDate,
+          address 
+        } = JSON.parse(pendingProfile);
+
         const { error: profileError } = await supabase
           .from('admin_profiles')
           .insert({
             user_id: data.user.id,
             full_name: fullName,
+            hostel_name: hostelName,
+            phone_number: `+91${phoneNumber}`,
+            birth_date: birthDate,
+            address: address
           });
 
         if (profileError) throw profileError;
@@ -54,7 +66,10 @@ export default function AdminLogin() {
       router.replace('/(admin)/hostel-dashboard');
     } catch (error: any) {
       console.error('Login Error:', error);
-      Alert.alert('Error', error.message);
+      Alert.alert(
+        'Error', 
+        error.message || 'An error occurred during login. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
@@ -100,6 +115,13 @@ export default function AdminLogin() {
           <Text style={styles.signupLink}>Sign Up</Text>
         </TouchableOpacity>
       </View>
+
+      <TouchableOpacity 
+        style={styles.forgotPassword}
+        onPress={() => router.push('/(auth)/forgot-password')}
+      >
+        <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -162,5 +184,13 @@ const styles = StyleSheet.create({
   signupLink: {
     color: '#4A7043',
     fontFamily: 'Aeonik-Medium',
+  },
+  forgotPassword: {
+    marginTop: 15,
+  },
+  forgotPasswordText: {
+    color: '#4A7043',
+    fontFamily: 'Aeonik-Regular',
+    textDecorationLine: 'underline',
   },
 });
