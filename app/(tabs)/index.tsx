@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Button } from 'react-native';
 import { useRouter } from 'expo-router';
 
 export default function SplashScreen() {
@@ -17,6 +17,10 @@ export default function SplashScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>ROOMMATE</Text>
+      <Button
+        title="View Transaction History"
+        onPress={() => router.push('/transactionHistory')}
+      />
     </View>
   );
 }
