@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, RefreshControl, Button, Modal, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
@@ -20,10 +20,15 @@ export default function StudentDashboard() {
     activeComplaints: 0,
     resolvedComplaints: 0,
   });
+  const [isPaymentModalVisible, setPaymentModalVisible] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [userId, setUserId] = useState('');
 
   useEffect(() => {
     loadData();
     setupRealtime();
+    fetchUserId();
     
     return () => {
       supabase.removeAllChannels();
@@ -125,6 +130,20 @@ export default function StudentDashboard() {
     }
   };
 
+  const fetchUserId = async () => {
+    const { data, error } = await supabase
+      .from('student_profiles')
+      .select('id')
+      .eq('email', (await supabase.auth.getUser()).data?.user?.email) // Fetch based on logged-in user's email
+      .single();
+
+    if (error) {
+      console.error('Error fetching user ID:', error.message);
+    } else {
+      setUserId(data.id);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadData();
@@ -138,6 +157,38 @@ export default function StudentDashboard() {
       router.replace('/(auth)/student');
     } catch (error: any) {
       Alert.alert('Error', error.message);
+    }
+  };
+
+  const handlePayment = async () => {
+    if (!amount || isNaN(parseFloat(amount)) || !description) {
+      Alert.alert('Error', 'Please enter a valid amount and description.');
+      return;
+    }
+
+    if (!userId) {
+      Alert.alert('Error', 'User ID not found. Please try again.');
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('transactions')
+      .insert([
+        {
+          date: new Date().toISOString().split('T')[0], // Current date
+          description,
+          amount: parseFloat(amount),
+          user_id: userId,
+        },
+      ]);
+
+    if (error) {
+      Alert.alert('Error', error.message);
+    } else {
+      Alert.alert('Success', 'Payment recorded successfully!');
+      setAmount('');
+      setDescription('');
+      setPaymentModalVisible(false);
     }
   };
 
@@ -193,6 +244,12 @@ export default function StudentDashboard() {
           >
             <Text style={styles.tabText}>Notifications</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.tabButton}
+            onPress={() => router.push('/(tabs)/transactionHistory')}
+          >
+            <Text style={styles.tabText}>Transaction History</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Stats Cards */}
@@ -243,6 +300,52 @@ export default function StudentDashboard() {
             <Text style={styles.infoValue}>{studentProfile?.id || 'N/A'}</Text>
           </View>
         </View>
+
+        {/* Payment Button */}
+        <TouchableOpacity
+          style={[styles.paymentButton, { marginTop: 20 }]} // Add margin to move the button down
+          onPress={() => setPaymentModalVisible(true)}
+        >
+          <Text style={styles.paymentButtonText}>Payment</Text> {/* Update text to "Payment" */}
+        </TouchableOpacity>
+
+        {/* Payment Modal */}
+        <Modal
+          visible={isPaymentModalVisible}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setPaymentModalVisible(false)}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Payment</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter Amount"
+                value={amount}
+                onChangeText={setAmount}
+                keyboardType="numeric"
+                placeholderTextColor="#888"
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Enter Description"
+                value={description}
+                onChangeText={setDescription}
+                placeholderTextColor="#888"
+              />
+              <TouchableOpacity style={styles.payButton} onPress={handlePayment}>
+                <Text style={styles.payButtonText}>Pay</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setPaymentModalVisible(false)}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </View>
     </ScrollView>
   );
@@ -385,5 +488,84 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Aeonik-Medium',
     color: '#333',
+  },
+  paymentButton: {
+    backgroundColor: '#2F4F2F', // Dark green
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 25,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  paymentButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)', // Semi-transparent black background
+  },
+  modalContent: {
+    width: '90%',
+    padding: 20,
+    backgroundColor: '#F5F7F5', // Very light green
+    borderRadius: 15,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 10,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#2F4F2F', // Dark green
+    marginBottom: 20,
+  },
+  input: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#4CAF50', // Medium dark green
+    padding: 10,
+    marginBottom: 15,
+    borderRadius: 10,
+    fontSize: 16,
+    backgroundColor: '#fff', // White background for input fields
+  },
+  payButton: {
+    backgroundColor: '#2F4F2F', // Dark green
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginTop: 10,
+    width: '100%',
+  },
+  payButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  cancelButton: {
+    backgroundColor: '#4CAF50', // Medium dark green
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginTop: 10,
+    width: '100%',
+  },
+  cancelButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
