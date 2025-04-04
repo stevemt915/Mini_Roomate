@@ -105,7 +105,7 @@ export default function StudentAttendance() {
           })}
         </Text>
         <Text style={styles.markedByText}>
-          Marked by: {item.marked_by || 'Admin'}
+          {item.marked_by ? `Marked by: ${item.marked_by}` : 'Marked by: Admin'}
         </Text>
       </View>
       <View style={[
@@ -113,7 +113,7 @@ export default function StudentAttendance() {
         item.status === 'present' ? styles.presentBadge : styles.absentBadge
       ]}>
         <Text style={styles.statusText}>
-          {item.status.toUpperCase()}
+          {item.status?.toUpperCase() || ''}
         </Text>
       </View>
     </View>
@@ -148,7 +148,6 @@ export default function StudentAttendance() {
     return totalDays > 0 ? Math.round((totalPresent / totalDays) * 100) : 0;
   };
 
-  // Combined render function with type checking
   const renderItem = ({ item }: { item: AttendanceRecord | MonthSummary }) => {
     if (activeTab === 'daily') {
       return renderDailyItem({ item: item as AttendanceRecord });
@@ -163,7 +162,7 @@ export default function StudentAttendance() {
           <MaterialIcons name="arrow-back" size={24} color="#4A7043" />
         </TouchableOpacity>
         <Text style={styles.title}>My Attendance</Text>
-        <View style={{ width: 24 }} /> {/* Spacer for alignment */}
+        <View style={{ width: 24 }}>{null}</View>
       </View>
 
       <View style={styles.tabs}>

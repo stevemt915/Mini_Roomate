@@ -30,40 +30,38 @@ export default function EditProfileScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        setLoading(true);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('No user found');
+
+        const { data, error } = await supabase
+          .from('student_profiles')
+          .select('*')
+          .eq('user_id', user.id)
+          .single();
+
+        if (error) throw error;
+
+        setProfile({
+          full_name: data.full_name || '',
+          room_number: data.room_number || '',
+          batch: data.batch || '',
+          hostel_name: data.hostel_name || '',
+          phone_number: data.phone_number || '',
+          date_of_birth: data.date_of_birth || new Date().toISOString(),
+          address: data.address || '',
+        });
+      } catch (error: any) {
+        Alert.alert('Error', error.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     fetchProfile();
   }, []);
-
-  const fetchProfile = async () => {
-    try {
-      setLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('No user found');
-
-      const { data: profileData, error } = await supabase
-        .from('student_profiles')
-        .select('*')
-        .eq('user_id', user.id)
-        .single();
-
-      if (error) throw error;
-
-      setProfile({
-        full_name: profileData.full_name,
-        room_number: profileData.room_number,
-        batch: profileData.batch,
-        hostel_name: profileData.hostel_name,
-        phone_number: profileData.phone_number,
-        date_of_birth: profileData.date_of_birth,
-        address: profileData.address,
-      });
-
-    } catch (error: any) {
-      console.error('Error fetching profile:', error.message);
-      Alert.alert('Error', 'Failed to load profile data');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleDateChange = (event: any, selectedDate?: Date) => {
     setShowDatePicker(false);
@@ -95,10 +93,8 @@ export default function EditProfileScreen() {
 
       Alert.alert('Success', 'Profile updated successfully');
       router.back();
-
     } catch (error: any) {
-      console.error('Error updating profile:', error.message);
-      Alert.alert('Error', 'Failed to update profile');
+      Alert.alert('Error', error.message);
     } finally {
       setSaving(false);
     }
@@ -123,6 +119,7 @@ export default function EditProfileScreen() {
             style={styles.input}
             value={profile.full_name}
             onChangeText={(text) => setProfile({ ...profile, full_name: text })}
+            placeholder="Enter your full name"
           />
         </View>
 
@@ -132,6 +129,7 @@ export default function EditProfileScreen() {
             style={styles.input}
             value={profile.room_number}
             onChangeText={(text) => setProfile({ ...profile, room_number: text })}
+            placeholder="Enter your room number"
           />
         </View>
 
@@ -141,6 +139,7 @@ export default function EditProfileScreen() {
             style={styles.input}
             value={profile.batch}
             onChangeText={(text) => setProfile({ ...profile, batch: text })}
+            placeholder="Enter your batch"
           />
         </View>
 
@@ -150,6 +149,7 @@ export default function EditProfileScreen() {
             style={styles.input}
             value={profile.hostel_name}
             onChangeText={(text) => setProfile({ ...profile, hostel_name: text })}
+            placeholder="Enter your hostel name"
           />
         </View>
 
@@ -160,6 +160,7 @@ export default function EditProfileScreen() {
             value={profile.phone_number}
             onChangeText={(text) => setProfile({ ...profile, phone_number: text })}
             keyboardType="phone-pad"
+            placeholder="Enter your phone number"
           />
         </View>
 
@@ -189,6 +190,7 @@ export default function EditProfileScreen() {
             value={profile.address}
             onChangeText={(text) => setProfile({ ...profile, address: text })}
             multiline
+            placeholder="Enter your address"
           />
         </View>
 

@@ -1,13 +1,29 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, RefreshControl, Button, Modal, TextInput } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  ScrollView, 
+  Alert, 
+  RefreshControl, 
+  Modal, 
+  TextInput,
+  ActivityIndicator
+} from 'react-native';
 import { useRouter } from 'expo-router';
-
-// Utility function to format dates
-const formatDate = (dateString: string): string => {
-  const options: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'long', day: 'numeric' };
-  return new Date(dateString).toLocaleDateString(undefined, options);
-};
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+
+interface Transaction {
+  id: string;
+  description: string;
+  amount: number;
+  date: string;
+  status: 'pending' | 'approved' | 'rejected';
+  is_reminder: boolean;
+  due_date?: string;
+  payment_date?: string;
+}
 
 type StudentProfile = {
   id: string;
@@ -21,6 +37,11 @@ type StudentProfile = {
   address: string;
 };
 
+const formatDate = (dateString: string): string => {
+  const options: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'long', day: 'numeric' };
+  return new Date(dateString).toLocaleDateString(undefined, options);
+};
+
 export default function StudentDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -31,16 +52,16 @@ export default function StudentDashboard() {
     activeComplaints: 0,
     resolvedComplaints: 0,
   });
+  const [pendingReminders, setPendingReminders] = useState<Transaction[]>([]);
   const [isPaymentModalVisible, setPaymentModalVisible] = useState(false);
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [userId, setUserId] = useState('');
+  const [selectedReminderId, setSelectedReminderId] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
     setupRealtime();
-    fetchUserId();
-    
     return () => {
       supabase.removeAllChannels();
     };
@@ -61,8 +82,18 @@ export default function StudentDashboard() {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'notifications' },
-        () => fetchStudentStats()
+        { event: '*', schema: 'public', table: 'transactions' },
+        () => fetchPendingReminders()
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'student_profiles' },
+        (payload) => {
+          if (payload.new.room_number !== studentProfile?.room_number) {
+            setStudentProfile(prev => prev ? { ...prev, room_number: payload.new.room_number } : null);
+            Alert.alert('Room Update', `Your room has been changed to ${payload.new.room_number}`);
+          }
+        }
       )
       .subscribe();
   };
@@ -70,7 +101,11 @@ export default function StudentDashboard() {
   const loadData = async () => {
     try {
       setLoading(true);
-      await Promise.all([fetchStudentData(), fetchStudentStats()]);
+      await Promise.all([
+        fetchStudentData(), 
+        fetchStudentStats(), 
+        fetchPendingReminders()
+      ]);
     } catch (error) {
       console.error('Error loading dashboard:', error);
       Alert.alert('Error', 'Failed to load dashboard data');
@@ -92,6 +127,7 @@ export default function StudentDashboard() {
 
       if (error) throw error;
       setStudentProfile(profile);
+      setUserId(user.id);
     } catch (error: any) {
       console.error('Error fetching student data:', error.message);
     }
@@ -102,7 +138,6 @@ export default function StudentDashboard() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No user found');
 
-      // Get attendance stats
       const { count: presentCount } = await supabase
         .from('attendance')
         .select('*', { count: 'exact' })
@@ -114,7 +149,6 @@ export default function StudentDashboard() {
         .select('*', { count: 'exact' })
         .eq('student_id', user.id);
 
-      // Get complaint stats
       const { count: activeComplaints } = await supabase
         .from('complaints')
         .select('*', { count: 'exact' })
@@ -141,17 +175,22 @@ export default function StudentDashboard() {
     }
   };
 
-  const fetchUserId = async () => {
-    const { data, error } = await supabase
-      .from('student_profiles')
-      .select('id')
-      .eq('email', (await supabase.auth.getUser()).data?.user?.email) // Fetch based on logged-in user's email
-      .single();
+  const fetchPendingReminders = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No user found');
 
-    if (error) {
-      console.error('Error fetching user ID:', error.message);
-    } else {
-      setUserId(data.id);
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('student_id', user.id)
+        .eq('is_reminder', true)
+        .eq('status', 'pending');
+
+      if (error) throw error;
+      setPendingReminders(data || []);
+    } catch (error) {
+      console.error('Error fetching reminders:', error);
     }
   };
 
@@ -172,41 +211,47 @@ export default function StudentDashboard() {
   };
 
   const handlePayment = async () => {
-    if (!amount || isNaN(parseFloat(amount)) || !description) {
-      Alert.alert('Error', 'Please enter a valid amount and description.');
+    if (!amount || isNaN(parseFloat(amount))) {
+      Alert.alert('Error', 'Please enter a valid amount.');
       return;
     }
-  
+
+    if (!selectedReminderId) {
+      Alert.alert('Error', 'No reminder selected for payment.');
+      return;
+    }
+
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('transactions')
-        .insert([
-          {
-            date: new Date().toISOString().split('T')[0], // Current date
-            description,
-            amount: parseFloat(amount),
-            user_id: userId,
-          },
-        ]);
-  
-      if (error) {
-        Alert.alert('Error', error.message);
-      } else {
-        Alert.alert('Success', 'Payment recorded successfully!');
-        setAmount('');
-        setDescription('');
-        setPaymentModalVisible(false);
-      }
+        .update({
+          status: 'approved',
+          payment_date: new Date().toISOString(),
+          amount: parseFloat(amount),
+          description: description || undefined,
+        })
+        .eq('id', selectedReminderId)
+        .eq('student_id', userId);
+
+      if (error) throw error;
+
+      Alert.alert('Success', 'Payment approved successfully!');
+      setAmount('');
+      setDescription('');
+      setSelectedReminderId(null);
+      setPaymentModalVisible(false);
+      fetchPendingReminders();
     } catch (error) {
-      console.error('Error processing payment:', error);
-      Alert.alert('Error', 'Failed to process payment.');
+      console.error('Error approving payment:', error);
+      Alert.alert('Error', 'Failed to approve payment.');
     }
   };
 
   if (loading && !refreshing) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.text}>Loading...</Text>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4A7043" />
+        <Text style={styles.loadingText}>Loading your dashboard...</Text>
       </View>
     );
   }
@@ -215,16 +260,28 @@ export default function StudentDashboard() {
     <ScrollView 
       style={styles.scrollView}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        <RefreshControl 
+          refreshing={refreshing} 
+          onRefresh={onRefresh}
+          tintColor="#4A7043"
+        />
       }
     >
       <View style={styles.container}>
         {/* Profile Section */}
         <View style={styles.profileSection}>
-          <Text style={styles.welcomeText}>
-            Welcome, {studentProfile?.full_name || 'Student'}
-          </Text>
-          <TouchableOpacity onPress={handleSignOut}>
+          <View>
+            <Text style={styles.welcomeText}>
+              Welcome back,
+            </Text>
+            <Text style={styles.userNameText}>
+              {studentProfile?.full_name || 'Student'}
+            </Text>
+          </View>
+          <TouchableOpacity 
+            onPress={handleSignOut}
+            style={styles.signOutButton}
+          >
             <Text style={styles.signOutText}>Sign Out</Text>
           </TouchableOpacity>
         </View>
@@ -235,7 +292,7 @@ export default function StudentDashboard() {
             style={[styles.tabButton, styles.activeTab]}
             onPress={() => router.push('/(student)/dashboard')}
           >
-            <Text style={styles.tabText}>Home</Text>
+            <Text style={styles.tabTextActive}>Dashboard</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.tabButton}
@@ -251,9 +308,9 @@ export default function StudentDashboard() {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.tabButton}
-            onPress={() => router.push('/(student)/notifications')}
+            onPress={() => router.push('/(student)/profile')}
           >
-            <Text style={styles.tabText}>Notifications</Text>
+            <Text style={styles.tabText}>Profile</Text>
           </TouchableOpacity>
         </View>
 
@@ -263,34 +320,17 @@ export default function StudentDashboard() {
             <Text style={styles.statNumber}>{stats.totalAttendance}%</Text>
             <Text style={styles.statLabel}>Attendance</Text>
             {stats.totalAttendance < 75 && (
-              <Text style={styles.warningText}>Low attendance!</Text>
+              <Text style={styles.warningText}>Improve needed</Text>
             )}
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{stats.activeComplaints}</Text>
-            <Text style={styles.statLabel}>Active Complaints</Text>
+            <Text style={styles.statLabel}>Active Issues</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{stats.resolvedComplaints}</Text>
-            <Text style={styles.statLabel}>Resolved Complaints</Text>
+            <Text style={styles.statLabel}>Resolved Issues</Text>
           </View>
-        </View>
-
-        {/* Quick Actions */}
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.actionsContainer}>
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => router.push('/(student)/complaint')}
-          >
-            <Text style={styles.actionButtonText}>Submit Complaint</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => router.push('/(student)/attendance')}
-          >
-            <Text style={styles.actionButtonText}>View Attendance</Text>
-          </TouchableOpacity>
         </View>
 
         {/* Student Info */}
@@ -312,27 +352,42 @@ export default function StudentDashboard() {
             <Text style={styles.infoLabel}>Hostel:</Text>
             <Text style={styles.infoValue}>{studentProfile?.hostel_name || 'N/A'}</Text>
           </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Phone:</Text>
-            <Text style={styles.infoValue}>{studentProfile?.phone_number || 'N/A'}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Date of Birth:</Text>
-            <Text style={styles.infoValue}>{studentProfile?.date_of_birth ? formatDate(studentProfile.date_of_birth) : 'N/A'}</Text>
-          </View>
-          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
-            <Text style={styles.infoLabel}>Address:</Text>
-            <Text style={[styles.infoValue, { textAlign: 'right', flex: 1 }]}>{studentProfile?.address || 'N/A'}</Text>
-          </View>
         </View>
 
-        {/* Payment Button */}
-        <TouchableOpacity
-          style={[styles.paymentButton, { marginTop: 20 }]} // Add margin to move the button down
-          onPress={() => setPaymentModalVisible(true)}
-        >
-          <Text style={styles.paymentButtonText}>Payment</Text> {/* Update text to "Payment" */}
-        </TouchableOpacity>
+        {/* Pending Reminders */}
+        <Text style={styles.sectionTitle}>Pending Payments</Text>
+        {pendingReminders.length > 0 ? (
+          <View style={styles.remindersContainer}>
+            {pendingReminders.map((reminder) => (
+              <View key={reminder.id} style={styles.reminderCard}>
+                <View style={styles.reminderHeader}>
+                  <Text style={styles.reminderDescription}>{reminder.description}</Text>
+                  <Text style={styles.reminderAmount}>${reminder.amount.toFixed(2)}</Text>
+                </View>
+                {reminder.due_date && (
+                  <Text style={styles.reminderDueDate}>
+                    Due: {formatDate(reminder.due_date)}
+                  </Text>
+                )}
+                <TouchableOpacity
+                  style={styles.payReminderButton}
+                  onPress={() => {
+                    setAmount(reminder.amount.toString());
+                    setDescription(reminder.description);
+                    setSelectedReminderId(reminder.id);
+                    setPaymentModalVisible(true);
+                  }}
+                >
+                  <Text style={styles.payReminderButtonText}>Pay Now</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.noRemindersContainer}>
+            <Text style={styles.noRemindersText}>No pending payments</Text>
+          </View>
+        )}
 
         {/* Payment Modal */}
         <Modal
@@ -343,31 +398,44 @@ export default function StudentDashboard() {
         >
           <View style={styles.modalContainer}>
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Payment</Text>
+              <Text style={styles.modalTitle}>Confirm Payment</Text>
+              
+              <Text style={styles.inputLabel}>Amount</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Enter Amount"
+                placeholder="Enter amount"
                 value={amount}
                 onChangeText={setAmount}
                 keyboardType="numeric"
                 placeholderTextColor="#888"
               />
+              
+              <Text style={styles.inputLabel}>Description</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Enter Description"
+                placeholder="Enter description"
                 value={description}
                 onChangeText={setDescription}
                 placeholderTextColor="#888"
               />
-              <TouchableOpacity style={styles.payButton} onPress={handlePayment}>
-                <Text style={styles.payButtonText}>Pay</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setPaymentModalVisible(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
+              
+              <View style={styles.modalButtonContainer}>
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => {
+                    setPaymentModalVisible(false);
+                    setSelectedReminderId(null);
+                  }}
+                >
+                  <Text style={styles.modalButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.confirmButton]}
+                  onPress={handlePayment}
+                >
+                  <Text style={styles.modalButtonText}>Confirm Payment</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>
@@ -385,34 +453,59 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
     backgroundColor: '#F5F7F5',
+    paddingBottom: 40,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F5F7F5',
+  },
+  loadingText: {
+    fontFamily: 'Aeonik-Regular',
+    fontSize: 16,
+    color: '#666',
+    marginTop: 20,
   },
   profileSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
-    marginTop: 40,
+    marginBottom: 25,
+    marginTop: 15,
   },
   welcomeText: {
+    fontSize: 18,
+    fontFamily: 'Aeonik-Regular',
+    color: '#555',
+  },
+  userNameText: {
     fontSize: 24,
     fontFamily: 'Aeonik-Bold',
     color: '#2F4F2F',
+    marginTop: 4,
+  },
+  signOutButton: {
+    backgroundColor: '#E8F5E9',
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    borderRadius: 20,
   },
   signOutText: {
     color: '#4A7043',
     fontFamily: 'Aeonik-Medium',
-    fontSize: 16,
+    fontSize: 14,
   },
   tabContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-    marginBottom: 20,
+    marginBottom: 25,
   },
   tabButton: {
     backgroundColor: '#E0E8DF',
-    paddingVertical: 10,
-    paddingHorizontal: 15,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
     borderRadius: 20,
   },
   activeTab: {
@@ -423,10 +516,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Aeonik-Medium',
   },
-  text: {
-    fontFamily: 'Aeonik-Regular',
-    fontSize: 16,
-    color: '#666',
+  tabTextActive: {
+    color: '#fff',
+    fontSize: 14,
+    fontFamily: 'Aeonik-Medium',
   },
   statsContainer: {
     flexDirection: 'row',
@@ -439,7 +532,7 @@ const styles = StyleSheet.create({
     minWidth: 100,
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 15,
+    padding: 18,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -469,23 +562,6 @@ const styles = StyleSheet.create({
     color: '#2F4F2F',
     marginBottom: 15,
   },
-  actionsContainer: {
-    flexDirection: 'row',
-    gap: 15,
-    marginBottom: 25,
-  },
-  actionButton: {
-    flex: 1,
-    backgroundColor: '#4A7043',
-    borderRadius: 8,
-    padding: 15,
-    alignItems: 'center',
-  },
-  actionButtonText: {
-    color: '#fff',
-    fontFamily: 'Aeonik-Medium',
-    fontSize: 14,
-  },
   infoCard: {
     width: '100%',
     backgroundColor: '#fff',
@@ -496,54 +572,100 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    marginBottom: 20,
+    marginBottom: 25,
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
   infoLabel: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: 'Aeonik-Regular',
     color: '#666',
   },
   infoValue: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: 'Aeonik-Medium',
     color: '#333',
   },
-  paymentButton: {
-    backgroundColor: '#2F4F2F', // Dark green
-    paddingVertical: 15,
-    paddingHorizontal: 30,
-    borderRadius: 25,
+  remindersContainer: {
+    marginBottom: 20,
+  },
+  reminderCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  reminderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  reminderDescription: {
+    fontSize: 16,
+    fontFamily: 'Aeonik-Medium',
+    color: '#333',
+    flex: 1,
+  },
+  reminderAmount: {
+    fontSize: 18,
+    fontFamily: 'Aeonik-Bold',
+    color: '#FFA500',
+    marginLeft: 10,
+  },
+  reminderDueDate: {
+    fontSize: 14,
+    fontFamily: 'Aeonik-Regular',
+    color: '#FF6B6B',
+    marginBottom: 12,
+  },
+  payReminderButton: {
+    backgroundColor: '#4A7043',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  payReminderButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontFamily: 'Aeonik-Medium',
+  },
+  noRemindersContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
-    elevation: 5,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  paymentButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  noRemindersText: {
+    fontSize: 16,
+    fontFamily: 'Aeonik-Regular',
+    color: '#666',
   },
   modalContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)', // Semi-transparent black background
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
     width: '90%',
     padding: 20,
-    backgroundColor: '#F5F7F5', // Very light green
+    backgroundColor: '#F5F7F5',
     borderRadius: 15,
-    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
@@ -551,47 +673,51 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#2F4F2F', // Dark green
+    fontSize: 20,
+    fontFamily: 'Aeonik-Bold',
+    color: '#2F4F2F',
     marginBottom: 20,
+    textAlign: 'center',
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontFamily: 'Aeonik-Medium',
+    color: '#555',
+    marginBottom: 8,
+    marginLeft: 5,
   },
   input: {
     width: '100%',
     borderWidth: 1,
-    borderColor: '#4CAF50', // Medium dark green
-    padding: 10,
-    marginBottom: 15,
+    borderColor: '#ddd',
+    padding: 12,
+    marginBottom: 20,
     borderRadius: 10,
     fontSize: 16,
-    backgroundColor: '#fff', // White background for input fields
+    backgroundColor: '#fff',
+    fontFamily: 'Aeonik-Regular',
   },
-  payButton: {
-    backgroundColor: '#2F4F2F', // Dark green
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+  modalButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
     borderRadius: 25,
     alignItems: 'center',
-    marginTop: 10,
-    width: '100%',
-  },
-  payButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    marginHorizontal: 5,
   },
   cancelButton: {
-    backgroundColor: '#4CAF50', // Medium dark green
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 25,
-    alignItems: 'center',
-    marginTop: 10,
-    width: '100%',
+    backgroundColor: '#E0E0E0',
   },
-  cancelButtonText: {
+  confirmButton: {
+    backgroundColor: '#4A7043',
+  },
+  modalButtonText: {
+    fontFamily: 'Aeonik-Medium',
+    fontSize: 15,
     color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
 });

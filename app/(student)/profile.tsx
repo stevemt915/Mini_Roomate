@@ -1,7 +1,6 @@
-// app/(student)/profile.tsx
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 
 type StudentProfile = {
@@ -21,19 +20,13 @@ export default function StudentProfileScreen() {
   const router = useRouter();
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
 
-  useEffect(() => {
-    fetchProfile();
-  }, []);
-
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     try {
       setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No user found');
 
-      // Get profile data
       const { data: profileData, error: profileError } = await supabase
         .from('student_profiles')
         .select('*')
@@ -42,21 +35,25 @@ export default function StudentProfileScreen() {
 
       if (profileError) throw profileError;
 
-      // Get email from auth
       const { data: { user: authUser } } = await supabase.auth.getUser();
       
       setProfile({
         ...profileData,
         email: authUser?.email
       });
-
     } catch (error: any) {
       console.error('Error fetching profile:', error.message);
       Alert.alert('Error', 'Failed to load profile data');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfile();
+    }, [fetchProfile])
+  );
 
   const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A';
